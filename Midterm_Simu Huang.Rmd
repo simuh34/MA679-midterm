@@ -1,0 +1,183 @@
+---
+title: "MA679 Midterm Exam"
+author: "Simu Huang"
+date: "3/18/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(
+  "data.table",
+  "magrittr",
+  "tidyr",
+  "formattable",
+  "MASS",
+  "randomForest",
+  "caret",
+  "pROC"
+)
+```
+
+## Context
+
+A company wants to hire data scientists from pool of people enrolled in the courses conduct by the company. The company wants to know which of these candidates are looking to change their job.  Information related to demographics, education, experience are in hands from candidates sign up and enrollment.  In this exam, your goal is to predict if the candidate is looking for a new job or will work for the current company. 
+
+- uid : Unique ID for candidate
+- city: City code
+- city_dev_index : Development index of the city (scaled) 
+- gender: Gender of candidate
+- relevant_experience: Relevant experience of candidate
+- enrolled_university: Type of University course enrolled if any
+- education_level: Education level of candidate
+- major_discipline :Education major discipline of candidate
+- experience_years: Candidate total experience in years
+- company_size: No of employees in current employer's company
+- company_type : Type of current employer
+- lastnewjob: Difference in years between previous job and current job
+- training_hours: training hours completed
+- change_job: 0 – Not looking for job change, 1 – Looking for a job change
+
+```{r, echo=FALSE}
+train<-fread("train_sample.csv")
+```
+
+-----------------------
+
+## Details of your work to be submitted.
+
+### Data Processing
+
+```{r}
+summary(train)
+
+# unique(train$gender)
+# unique(train$relevant_experience)
+# unique(train$enrolled_university)
+# unique(train$experience_years)
+# unique(train$city_id)
+# unique(train$company_size)
+
+df <- data.frame(train)
+df %<>% separate(city_id, c("city_x", "city_id_n"), sep = "_" )
+df <- df[, -3]
+
+df$gender[which(df$gender == "")] <- "unknown"
+
+# table(df[, 9])
+# table(df[, 11])
+# table(df[, 7])
+# table(df[, 8])
+# table(df[, 11])
+# table(df[, 12])
+
+df$major_discipline[which(df$major_discipline == "")] <- "STEM"
+df$enrolled_university[which(df$enrolled_university == "")] <- "no_enrollment"
+df$education_level[which(df$education_level == "")] <- "Graduate"
+df$company_size[which(df$company_size == "")] <- "unknown"
+df$company_type[which(df$company_type == "")] <- "Pvt Ltd"
+
+df$city_id_n <- as.numeric(df$city_id_n)
+
+names_fac <- c(5:13)
+df[,names_fac] <- lapply(df[,names_fac], as.factor)
+
+# sum(is.na(df))
+
+set.seed(327)
+index <- sample(nrow(df), nrow(df)/2, replace = FALSE )
+
+#training samples
+df_tr <- df[index, -1]
+
+#testing samples
+df_ts <- df[-index, -1]
+
+#summary(df_tr)
+#summary(df_ts)
+```
+
+
+### Model Selection
+
+
+```{r, include = FALSE}
+# random forest
+set.seed(327)
+rf_fit <-  randomForest( as.factor(change_job) ~ city_id_n + city_dev_index + gender + relevant_experience + enrolled_university + education_level + major_discipline + company_size + company_type, data = df_tr, mtry = 3)
+```
+```{r}
+summary(rf_fit)
+```
+
+
+
+### Model Validation
+
+```{r, echo = FALSE}
+print(rf_fit)
+c_rate_rf <- (rf_fit$confusion[1] + rf_fit$confusion[2]) / 4000
+
+print(paste0("The Random Forest correctly predict ", percent(c_rate_rf), " of people's choices."))
+
+rf_pre <- predict(rf_fit, newdata = df_ts)
+```
+
+
+### Model Evaluation
+
+```{r, echo = FALSE, warning = FALSE}
+roc <- roc(as.ordered(df_ts$change_job), as.ordered(rf_pre))
+roc
+plot(roc, print.auc = T, auc.polygon = T, grid = c(0.1, 0.2), max.auc.polygon = T, auc.polygon.col = "skyblue", print.thres = T)
+```
+
+The area under curve here is 0.6707, which means that the model can accurately predict 67.1% of the sample. Generally, 0.7 to 0.8 is considered acceptable. The random forest we used here is suitable.
+
+
+### Discussion
+
+The advantages of random forests are that random forest can process high-dimensional data without reducing features and if a large part of the features are missing, the accuracy can still be maintained. Meanwhile, the random forest can directly deal with qualitative variables without creating dummy variables. Therefore, we choose random forest here.
+
+### Limitations
+
+There are too many missing values in the variable "Gender", which will affects our prediction. The data processing methods we use here are that replacing an entire range of values with a specific value and treating many numerical values as factors, which may affect the accuracy of our prediction.  
+
+## Reference
+
+1.[r package]"data.table","magrittr", "tidyr","formattable","MASS", "randomForest",  "caret", "pROC"
+
+2.[random forest] (https://easyai.tech/ai-definition/random-forest/#tests)
+
+3.[pRoc] (https://cran.r-project.org/web/packages/pROC/pROC.pdf)
+
+## Appendix
+
+### Processing the test sample
+```{r, echo=FALSE}
+test <- fread("test_sample.csv")
+submission <- fread("submission.csv")
+```
+```{r}
+test <- data.frame(test)
+test %<>% separate(city_id, c("city_x", "city_id_n"), sep = "_" )
+test <- test[, -3]
+
+test$gender[which(test$gender == "")] <- "unknown"
+
+test$major_discipline[which(test$major_discipline == "")] <- "STEM"
+test$enrolled_university[which(test$enrolled_university == "")] <- "no_enrollment"
+test$education_level[which(test$education_level == "")] <- "Graduate"
+test$company_size[which(test$company_size == "")] <- "unknown"
+test$company_type[which(test$company_type == "")] <- "Pvt Ltd"
+test$city_id_n <- as.numeric(test$city_id_n)
+
+names_fac <- c(5:13)
+test[,names_fac] <- lapply(test[,names_fac], as.factor)
+
+ts_pred <- predict(rf_fit, test, type = "class")
+submission$change_job <- ts_pred
+#sum(is.na(test))
+
+write.csv(submission, file = "submission.csv")
+```
